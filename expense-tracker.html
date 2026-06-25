@@ -472,28 +472,6 @@ textarea{resize:vertical;min-height:72px;}
       <!-- SETTINGS -->
       <div id="tab-settings" class="section">
 
-        <!-- SUPABASE -->
-        <div class="form-section" style="margin-bottom:16px;">
-          <div class="form-section-title">⚡ Supabase — Cloud sync</div>
-          <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6;">Connect Supabase to sync expenses across devices in real time.</p>
-          <div id="sb-status" style="margin-bottom:12px;font-size:13px;"></div>
-          <div class="form-grid" style="margin-bottom:12px;max-width:560px;">
-            <div class="form-group">
-              <label>Project URL</label>
-              <input type="text" id="sb-url" placeholder="https://xxxx.supabase.co" style="font-size:13px;"/>
-            </div>
-            <div class="form-group">
-              <label>Anon public key</label>
-              <input type="password" id="sb-key" placeholder="eyJh…" style="font-size:13px;font-family:monospace;"/>
-            </div>
-          </div>
-          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
-            <button class="btn btn-green" onclick="connectSupabase()">Connect →</button>
-            <button class="btn btn-outline" id="sb-disconnect-btn" onclick="disconnectSupabase()" style="display:none;">Disconnect</button>
-            <button class="btn btn-outline btn-sm" id="sb-migrate-btn" onclick="migrateToSupabase()" style="display:none;">⬆ Migrate local data</button>
-          </div>
-        </div>
-
         <!-- USER NAMES -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">👥 User names</div>
