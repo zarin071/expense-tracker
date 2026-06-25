@@ -5,6 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Kharcha — Shared Expense Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 :root{
@@ -281,6 +282,7 @@ textarea{resize:vertical;min-height:72px;}
     </nav>
     <div class="sb-footer">
       <div class="sb-export" onclick="exportCSV()">⬇ Export CSV</div>
+      <div id="sb-sync-bar" style="font-size:11px;padding:4px 0;display:flex;align-items:center;gap:6px;"></div>
     </div>
   </aside>
 
@@ -470,6 +472,28 @@ textarea{resize:vertical;min-height:72px;}
       <!-- SETTINGS -->
       <div id="tab-settings" class="section">
 
+        <!-- SUPABASE -->
+        <div class="form-section" style="margin-bottom:16px;">
+          <div class="form-section-title">⚡ Supabase — Cloud sync</div>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:12px;line-height:1.6;">Connect Supabase to sync expenses across devices in real time.</p>
+          <div id="sb-status" style="margin-bottom:12px;font-size:13px;"></div>
+          <div class="form-grid" style="margin-bottom:12px;max-width:560px;">
+            <div class="form-group">
+              <label>Project URL</label>
+              <input type="text" id="sb-url" placeholder="https://xxxx.supabase.co" style="font-size:13px;"/>
+            </div>
+            <div class="form-group">
+              <label>Anon public key</label>
+              <input type="password" id="sb-key" placeholder="eyJh…" style="font-size:13px;font-family:monospace;"/>
+            </div>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-green" onclick="connectSupabase()">Connect →</button>
+            <button class="btn btn-outline" id="sb-disconnect-btn" onclick="disconnectSupabase()" style="display:none;">Disconnect</button>
+            <button class="btn btn-outline btn-sm" id="sb-migrate-btn" onclick="migrateToSupabase()" style="display:none;">⬆ Migrate local data</button>
+          </div>
+        </div>
+
         <!-- USER NAMES -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">👥 User names</div>
@@ -517,6 +541,7 @@ let currentUser = null, selectedUser = null;
 let categories = [], expenses = [], recurring = [];
 let donutChart = null, barChart = null;
 let editingId = null;
+let sbClient = null, sbChannel = null;
 
 const SK_EXP = 'kharcha-exp', SK_CAT = 'kharcha-cat', SK_REC = 'kharcha-rec', SK_MER = 'kharcha-merchants', SK_PAY = 'kharcha-payments';
 
@@ -542,7 +567,7 @@ const DEFAULT_PAYMENTS = [
 ];
 let merchants = [], paymentMethods = [];
 
-// ── STORAGE ──
+// ── LOCALSTORAGE ──
 function save(){
   localStorage.setItem(SK_EXP,JSON.stringify(expenses));
   localStorage.setItem(SK_CAT,JSON.stringify(categories));
@@ -559,6 +584,141 @@ function load(){
   merchants = sm ? JSON.parse(sm) : [...DEFAULT_MERCHANTS];
   const sp = localStorage.getItem(SK_PAY);
   paymentMethods = sp ? JSON.parse(sp) : [...DEFAULT_PAYMENTS];
+}
+
+// ── SUPABASE ──
+// row mappers
+const fromDbExp = r => ({id:r.id,name:r.name,amount:r.amount,catId:r.cat_id||'',date:r.date,note:r.note||'',addedBy:r.added_by,merchant:r.merchant||'',payment:r.payment||''});
+const toDbExp   = e => ({id:e.id,name:e.name,amount:e.amount,cat_id:e.catId,date:e.date,note:e.note||'',added_by:e.addedBy,merchant:e.merchant||'',payment:e.payment||''});
+const fromDbRec = r => ({id:r.id,name:r.name,amount:r.amount,catId:r.cat_id||'',freq:r.freq,nextDue:r.next_due,addedBy:r.added_by});
+const toDbRec   = r => ({id:r.id,name:r.name,amount:r.amount,cat_id:r.catId,freq:r.freq,next_due:r.nextDue,added_by:r.addedBy});
+const fromDbCat = c => ({id:c.id,name:c.name,color:c.color,icon:c.icon||'📌'});
+const toDbCat   = (c,i) => ({id:c.id,name:c.name,color:c.color,icon:c.icon||'📌',sort_order:i});
+
+function getSbCreds(){ return {url:localStorage.getItem('kharcha-sb-url')||'', key:localStorage.getItem('kharcha-sb-key')||''}; }
+
+async function connectSupabase(){
+  const url = document.getElementById('sb-url').value.trim();
+  const key = document.getElementById('sb-key').value.trim();
+  if(!url||!key){ toast('Enter both URL and anon key'); return; }
+  if(!url.startsWith('https://')){ toast('URL should start with https://'); return; }
+  try{
+    sbClient = supabase.createClient(url, key);
+    // Test connection
+    const {error} = await sbClient.from('expenses').select('id').limit(1);
+    if(error) throw error;
+    localStorage.setItem('kharcha-sb-url', url);
+    localStorage.setItem('kharcha-sb-key', key);
+    await loadFromSupabase();
+    setupRealtimeSync();
+    setSyncStatus(true);
+    toast('Supabase connected ✓');
+    renderSettings();
+  }catch(e){
+    sbClient = null;
+    toast('Connection failed: '+e.message);
+    document.getElementById('sb-status').innerHTML=`<span style="color:var(--red);">✗ ${e.message}</span>`;
+  }
+}
+
+function disconnectSupabase(){
+  if(sbChannel) sbClient.removeChannel(sbChannel);
+  sbClient = null; sbChannel = null;
+  localStorage.removeItem('kharcha-sb-url');
+  localStorage.removeItem('kharcha-sb-key');
+  load();
+  setSyncStatus(false);
+  toast('Disconnected — using local storage');
+  renderSettings();
+  renderOverview();
+}
+
+async function loadFromSupabase(){
+  const [expR, recR, catR, merR, payR] = await Promise.all([
+    sbClient.from('expenses').select('*'),
+    sbClient.from('recurring_expenses').select('*'),
+    sbClient.from('categories').select('*').order('sort_order'),
+    sbClient.from('merchants').select('name').order('name'),
+    sbClient.from('payment_methods').select('name').order('name'),
+  ]);
+  if(expR.data) expenses = expR.data.map(fromDbExp);
+  if(recR.data) recurring = recR.data.map(fromDbRec);
+  if(catR.data && catR.data.length) categories = catR.data.map(fromDbCat);
+  if(merR.data && merR.data.length) merchants = merR.data.map(r=>r.name);
+  if(payR.data && payR.data.length) paymentMethods = payR.data.map(r=>r.name);
+  save(); // mirror to localStorage as cache
+  populateAllSelects();
+  renderCurrentTab();
+}
+
+function setupRealtimeSync(){
+  if(sbChannel) sbClient.removeChannel(sbChannel);
+  sbChannel = sbClient.channel('kharcha-sync')
+    .on('postgres_changes',{event:'*',schema:'public',table:'expenses'},()=>refreshTable('expenses'))
+    .on('postgres_changes',{event:'*',schema:'public',table:'recurring_expenses'},()=>refreshTable('recurring_expenses'))
+    .on('postgres_changes',{event:'*',schema:'public',table:'categories'},()=>refreshTable('categories'))
+    .on('postgres_changes',{event:'*',schema:'public',table:'merchants'},()=>refreshTable('merchants'))
+    .on('postgres_changes',{event:'*',schema:'public',table:'payment_methods'},()=>refreshTable('payment_methods'))
+    .subscribe();
+}
+
+async function refreshTable(table){
+  if(!sbClient) return;
+  if(table==='expenses'){
+    const {data} = await sbClient.from('expenses').select('*');
+    if(data){ expenses=data.map(fromDbExp); save(); renderCurrentTab(); }
+  } else if(table==='recurring_expenses'){
+    const {data} = await sbClient.from('recurring_expenses').select('*');
+    if(data){ recurring=data.map(fromDbRec); save(); }
+    const active=document.querySelector('.section.active');
+    if(active&&active.id==='tab-recurring') renderRecurring();
+  } else if(table==='categories'){
+    const {data} = await sbClient.from('categories').select('*').order('sort_order');
+    if(data&&data.length){ categories=data.map(fromDbCat); save(); populateAllSelects(); }
+  } else if(table==='merchants'){
+    const {data} = await sbClient.from('merchants').select('name').order('name');
+    if(data&&data.length){ merchants=data.map(r=>r.name); save(); populateAllSelects(); }
+  } else if(table==='payment_methods'){
+    const {data} = await sbClient.from('payment_methods').select('name').order('name');
+    if(data&&data.length){ paymentMethods=data.map(r=>r.name); save(); populateAllSelects(); }
+  }
+}
+
+function renderCurrentTab(){
+  const active=document.querySelector('.section.active');
+  if(!active) return;
+  const tab=active.id.replace('tab-','');
+  if(tab==='overview') renderOverview();
+  else if(tab==='expenses'){ populateFilterCat(); populateFilterMonth(); renderExpenses(); }
+  else if(tab==='recurring') renderRecurring();
+}
+
+async function migrateToSupabase(){
+  if(!sbClient){ toast('Connect Supabase first'); return; }
+  if(!confirm('Upload all local data to Supabase? Existing remote data will be overwritten.')) return;
+  try{
+    const catRows = categories.map((c,i)=>toDbCat(c,i));
+    const expRows = expenses.map(toDbExp);
+    const recRows = recurring.map(toDbRec);
+    const merRows = merchants.map(n=>({name:n}));
+    const payRows = paymentMethods.map(n=>({name:n}));
+    await Promise.all([
+      sbClient.from('categories').upsert(catRows),
+      sbClient.from('expenses').upsert(expRows),
+      sbClient.from('recurring_expenses').upsert(recRows),
+      sbClient.from('merchants').upsert(merRows),
+      sbClient.from('payment_methods').upsert(payRows),
+    ]);
+    toast('Local data migrated ✓');
+  }catch(e){ toast('Migration error: '+e.message); }
+}
+
+function setSyncStatus(on){
+  const el=document.getElementById('sb-sync-bar');
+  if(!el) return;
+  el.innerHTML = on
+    ? `<div style="width:7px;height:7px;border-radius:50%;background:#1aad5e;flex-shrink:0;"></div><span style="color:rgba(255,255,255,.5);">Syncing to Supabase</span>`
+    : `<div style="width:7px;height:7px;border-radius:50%;background:#6b7280;flex-shrink:0;"></div><span style="color:rgba(255,255,255,.35);">Local only</span>`;
 }
 
 // ── HELPERS ──
@@ -593,6 +753,17 @@ function startApp(){
   checkDue();
   renderOverview();
   populateAllSelects();
+  autoConnectSupabase();
+}
+async function autoConnectSupabase(){
+  const {url,key} = getSbCreds();
+  if(!url||!key){ setSyncStatus(false); return; }
+  try{
+    sbClient = supabase.createClient(url, key);
+    await loadFromSupabase();
+    setupRealtimeSync();
+    setSyncStatus(true);
+  }catch(e){ sbClient=null; setSyncStatus(false); }
 }
 function initUser(){
   const isZ = currentUser==='zarin';
@@ -619,6 +790,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     checkDue();
     renderOverview();
     populateAllSelects();
+    autoConnectSupabase();
   }
 });
 
@@ -779,18 +951,16 @@ function saveExpense(){
   const payment=document.getElementById('exp-payment').value;
   if(!name||!amount||!date){toast('Fill in description, amount and date');return;}
 
+  const expId = editingId || uid();
   const expData={name,amount,catId,date,note,addedBy,merchant,payment};
+  const full = {id:expId,...expData};
 
-  if(editingId){
-    const idx=expenses.findIndex(e=>e.id===editingId);
-    if(idx>-1) expenses[idx]={...expenses[idx],...expData};
-  } else {
-    expenses.push({id:uid(),...expData});
-  }
-  save();
-  clearAddForm();
-  toast(editingId?'Expense updated ✓':'Expense added ✓');
-  switchTab('expenses');
+  // optimistic update
+  if(editingId){ const i=expenses.findIndex(e=>e.id===editingId); if(i>-1) expenses[i]=full; }
+  else expenses.push(full);
+  save(); clearAddForm(); toast(editingId?'Expense updated ✓':'Expense added ✓'); switchTab('expenses');
+
+  if(sbClient) sbClient.from('expenses').upsert(toDbExp(full)).catch(e=>toast('Sync error: '+e.message));
 }
 
 function editExpense(id){
@@ -855,6 +1025,7 @@ function deleteExpense(id){
   if(!confirm('Delete this expense?')) return;
   expenses=expenses.filter(e=>e.id!==id);
   save(); renderExpenses(); toast('Deleted');
+  if(sbClient) sbClient.from('expenses').delete().eq('id',id).catch(e=>toast('Sync error: '+e.message));
 }
 
 // ── EXPORT CSV ──
@@ -890,9 +1061,11 @@ function addRecurring(){
   const date=document.getElementById('rec-date').value;
   const addedBy=document.getElementById('rec-user').value;
   if(!name||!amount||!date){toast('Fill in all required fields');return;}
-  const recData={name,amount,catId,freq,nextDue:date,addedBy};
-  recurring.push({id:uid(),...recData});
+  const recId=uid();
+  const recData={id:recId,name,amount,catId,freq,nextDue:date,addedBy};
+  recurring.push(recData);
   save(); clearRecForm(); renderRecurring(); toast('Recurring expense added ✓');
+  if(sbClient) sbClient.from('recurring_expenses').upsert(toDbRec(recData)).catch(e=>toast('Sync error: '+e.message));
 }
 function clearRecForm(){
   ['rec-name','rec-amount'].forEach(id=>document.getElementById(id).value='');
@@ -909,16 +1082,22 @@ function checkDue(){}
 function logNow(id){
   const r=recurring.find(x=>x.id===id);
   if(!r) return;
-  const expData={name:r.name,amount:r.amount,catId:r.catId,date:today(),note:'Recurring',addedBy:r.addedBy,merchant:'',payment:''};
+  const newExpId=uid();
+  const expData={id:newExpId,name:r.name,amount:r.amount,catId:r.catId,date:today(),note:'Recurring',addedBy:r.addedBy,merchant:'',payment:''};
   const newDue=calcNextDue(today(),r.freq);
-  expenses.push({id:uid(),...expData});
+  expenses.push(expData);
   r.nextDue=newDue;
   save(); renderRecurring(); toast(`"${r.name}" logged ✓`);
+  if(sbClient){
+    sbClient.from('expenses').upsert(toDbExp(expData)).catch(e=>toast('Sync error: '+e.message));
+    sbClient.from('recurring_expenses').update({next_due:newDue}).eq('id',id).catch(e=>toast('Sync error: '+e.message));
+  }
 }
 function deleteRec(id){
   if(!confirm('Remove this recurring expense?')) return;
   recurring=recurring.filter(r=>r.id!==id);
   save(); renderRecurring(); toast('Removed');
+  if(sbClient) sbClient.from('recurring_expenses').delete().eq('id',id).catch(e=>toast('Sync error: '+e.message));
 }
 function renderRecurring(){
   populateAllSelects();
@@ -961,15 +1140,18 @@ function addCategory(){
   const color=document.getElementById('cat-color').value;
   if(!name){toast('Enter a category name');return;}
   if(categories.find(c=>c.name.toLowerCase()===name.toLowerCase())){toast('Category already exists');return;}
-  categories.push({id:uid(),name,color,icon:'📌'});
+  const newCat={id:uid(),name,color,icon:'📌'};
+  categories.push(newCat);
   document.getElementById('cat-name').value='';
   save();
   renderCategories(); populateAllSelects(); toast('Category added ✓');
+  if(sbClient) sbClient.from('categories').upsert(toDbCat(newCat,categories.length-1)).catch(e=>toast('Sync error: '+e.message));
 }
 function removeCat(id){
   if(expenses.some(e=>e.catId===id)&&!confirm('This category has expenses. Remove anyway?')) return;
   categories=categories.filter(c=>c.id!==id);
   save();
+  if(sbClient) sbClient.from('categories').delete().eq('id',id).catch(e=>toast('Sync error: '+e.message));
   renderCategories(); populateAllSelects();
 }
 function renderCategories(){
@@ -1003,10 +1185,12 @@ function addMerchant(){
   document.getElementById('merchant-name').value='';
   save();
   renderCategories(); populateAllSelects(); toast('Merchant added ✓');
+  if(sbClient) sbClient.from('merchants').upsert({name}).catch(e=>toast('Sync error: '+e.message));
 }
 function removeMerchant(name){
   merchants=merchants.filter(m=>m!==name);
   save();
+  if(sbClient) sbClient.from('merchants').delete().eq('name',name).catch(e=>toast('Sync error: '+e.message));
   renderCategories(); populateAllSelects();
 }
 
@@ -1019,10 +1203,12 @@ function addPayment(){
   document.getElementById('payment-name').value='';
   save();
   renderCategories(); populateAllSelects(); toast('Payment method added ✓');
+  if(sbClient) sbClient.from('payment_methods').upsert({name}).catch(e=>toast('Sync error: '+e.message));
 }
 function removePayment(name){
   paymentMethods=paymentMethods.filter(p=>p!==name);
   save();
+  if(sbClient) sbClient.from('payment_methods').delete().eq('name',name).catch(e=>toast('Sync error: '+e.message));
   renderCategories(); populateAllSelects();
 }
 
@@ -1035,15 +1221,40 @@ function saveNames(){
 }
 function getDisplayName(user){ return localStorage.getItem('kharcha-name-'+user)||(user==='zarin'?'Zarin':'Husband'); }
 
-function clearAllData(){
+async function clearAllData(){
   if(!confirm('Delete ALL expenses, categories and settings? This cannot be undone.')) return;
-  [SK_EXP,SK_CAT,SK_REC,SK_MER,SK_PAY,'kharcha-user','kharcha-name-zarin','kharcha-name-husband'].forEach(k=>localStorage.removeItem(k));
+  if(sbClient){
+    await Promise.all([
+      sbClient.from('expenses').delete().neq('id','__none__'),
+      sbClient.from('recurring_expenses').delete().neq('id','__none__'),
+      sbClient.from('categories').delete().neq('id','__none__'),
+      sbClient.from('merchants').delete().neq('name','__none__'),
+      sbClient.from('payment_methods').delete().neq('name','__none__'),
+    ]).catch(()=>{});
+  }
+  [SK_EXP,SK_CAT,SK_REC,SK_MER,SK_PAY,'kharcha-user','kharcha-name-zarin','kharcha-name-husband','kharcha-sb-url','kharcha-sb-key'].forEach(k=>localStorage.removeItem(k));
   location.reload();
 }
 
 function renderSettings(){
   document.getElementById('name-zarin').value=getDisplayName('zarin');
   document.getElementById('name-husband').value=getDisplayName('husband');
+  const {url,key}=getSbCreds();
+  if(url) document.getElementById('sb-url').value=url;
+  if(key) document.getElementById('sb-key').value=key;
+  const statusEl=document.getElementById('sb-status');
+  const disconnBtn=document.getElementById('sb-disconnect-btn');
+  const migBtn=document.getElementById('sb-migrate-btn');
+  if(sbClient){
+    statusEl.innerHTML=`<span style="color:var(--green);font-weight:500;">✓ Connected</span>`;
+    disconnBtn.style.display=''; migBtn.style.display='';
+  } else if(url){
+    statusEl.innerHTML=`<span style="color:var(--text3);">Credentials saved — reconnecting on next load</span>`;
+    disconnBtn.style.display=''; migBtn.style.display='none';
+  } else {
+    statusEl.innerHTML=`<span style="color:var(--text3);">Not connected — using local storage</span>`;
+    disconnBtn.style.display='none'; migBtn.style.display='none';
+  }
 }
 
 // ── PARSE SMS ──
