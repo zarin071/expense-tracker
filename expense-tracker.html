@@ -188,10 +188,6 @@ textarea{resize:vertical;min-height:72px;}
 .cat-chip-del{background:none;border:none;color:var(--text3);cursor:pointer;font-size:16px;line-height:1;padding:0 0 0 4px;}
 .cat-chip-del:hover{color:var(--red);}
 
-/* ── APP DETECT ── */
-.detect-box{margin-top:12px;padding:12px 14px;background:var(--orange-lt);border:1px solid #fed7aa;border-radius:var(--radius);font-size:13px;color:#7c2d12;display:flex;align-items:center;gap:8px;}
-.spinner-sm{width:14px;height:14px;border:2px solid #fdba74;border-top-color:transparent;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0;}
-@keyframes spin{to{transform:rotate(360deg)}}
 
 /* ── SMS PARSE ── */
 .sms-info{background:var(--blue-lt);border:1px solid #bfdbfe;border-radius:var(--radius);padding:12px 14px;font-size:13px;color:#1e40af;margin-bottom:14px;line-height:1.5;}
@@ -334,7 +330,7 @@ textarea{resize:vertical;min-height:72px;}
           <div class="form-grid" style="margin-bottom:14px;">
             <div class="form-group">
               <label>Description *</label>
-              <input type="text" id="exp-name" placeholder="e.g. Swiggy, petrol, rent…" oninput="handleDescChange()"/>
+              <input type="text" id="exp-name" placeholder="e.g. Swiggy, petrol, rent…"/>
             </div>
             <div class="form-group">
               <label>Amount (₹) *</label>
@@ -374,7 +370,6 @@ textarea{resize:vertical;min-height:72px;}
               <input type="text" id="exp-note" placeholder="Any details…"/>
             </div>
           </div>
-          <div id="app-detect-result"></div>
           <div class="form-actions">
             <button class="btn btn-outline" id="add-form-cancel" onclick="cancelEdit()" style="display:none;">Cancel</button>
             <button class="btn btn-outline" id="add-form-clear" onclick="clearAddForm()">Clear</button>
@@ -512,28 +507,6 @@ textarea{resize:vertical;min-height:72px;}
           </div>
         </div>
 
-        <!-- CLAUDE AI -->
-        <div class="form-section" style="margin-bottom:16px;">
-          <div class="form-section-title">🤖 Claude AI — API key</div>
-          <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">The AI features (app detection, SMS parsing) need your Anthropic API key. It's saved only on <em>this device</em> in your browser — never sent anywhere except directly to Anthropic's API.</p>
-          <div class="form-group" style="max-width:480px;margin-bottom:12px;">
-            <label>Anthropic API key</label>
-            <div style="display:flex;gap:8px;">
-              <input type="password" id="api-key-input" placeholder="sk-ant-…" style="flex:1;font-family:monospace;font-size:13px;"/>
-              <button class="btn btn-green" onclick="saveApiKey()">Save</button>
-            </div>
-          </div>
-          <div id="api-key-status" style="font-size:13px;"></div>
-          <div style="margin-top:14px;padding:12px 14px;background:var(--surface2);border-radius:var(--radius);font-size:12px;color:var(--text2);line-height:1.6;">
-            <strong>How to get your API key:</strong><br/>
-            1. Go to <a href="https://console.anthropic.com/settings/keys" target="_blank" style="color:var(--green);text-decoration:underline;">console.anthropic.com/settings/keys</a><br/>
-            2. Click <em>Create Key</em> and copy it<br/>
-            3. Paste it above and click Save<br/>
-            <br/>
-            <strong>Cost:</strong> Each AI suggestion uses ~200 tokens ≈ $0.0003. Very cheap for occasional use.
-          </div>
-        </div>
-
         <!-- USER NAMES -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">👥 User names</div>
@@ -579,7 +552,7 @@ textarea{resize:vertical;min-height:72px;}
 // ── STATE ──
 let currentUser = null, selectedUser = null;
 let categories = [], expenses = [], recurring = [];
-let donutChart = null, barChart = null, detectDebounce = null;
+let donutChart = null, barChart = null;
 let editingId = null;
 let db = null, fbListeners = [];
 
@@ -1000,35 +973,6 @@ function expItemHTML(e){
 }
 
 // ── ADD / EDIT EXPENSE ──
-function handleDescChange(){
-  clearTimeout(detectDebounce);
-  const name=document.getElementById('exp-name').value.trim();
-  if(name.length<3){document.getElementById('app-detect-result').innerHTML='';return;}
-  detectDebounce=setTimeout(()=>detectApp(name),800);
-}
-async function detectApp(desc){
-  const el=document.getElementById('app-detect-result');
-  el.innerHTML=`<div class="detect-box"><div class="spinner-sm"></div> Detecting payment app…</div>`;
-  try{
-    const apiKey=getApiKey();
-    if(!apiKey){el.innerHTML='<div class="detect-box">⚙️ Add your API key in <strong>Settings</strong> to enable AI detection</div>';return;}
-    const res=await fetch('https://api.anthropic.com/v1/messages',{method:'POST',headers:{'Content-Type':'application/json','x-api-key':apiKey,'anthropic-version':'2023-06-01','anthropic-dangerous-direct-browser-access':'true'},body:JSON.stringify({
-      model:'claude-sonnet-4-6',max_tokens:120,
-      system:`You are a smart expense helper for Indian users. Given a transaction description, identify which app or payment method was likely used (GPay, PhonePe, Paytm, Swiggy, Zomato, Amazon, Flipkart, Ola, Uber, Netflix, Hotstar, IRCTC, BookMyShow, BigBasket, Blinkit, Zepto, HDFC, ICICI, UPI, Cash, etc.) and the best expense category from: Food & dining, Transport, Shopping, Bills & utilities, Health, Entertainment, Groceries, EMI / Loans. Reply ONLY with JSON: {"app":"name or Unknown","category":"category name","confidence":"high|medium|low"}`,
-      messages:[{role:'user',content:`Transaction: "${desc}"`}]
-    })});
-    const data=await res.json();
-    const text=data.content?.find(b=>b.type==='text')?.text||'';
-    const parsed=JSON.parse(text.replace(/```json|```/g,'').trim());
-    let html=`<div class="detect-box">`;
-    if(parsed.app&&parsed.app!=='Unknown') html+=`💳 Likely via <strong>${parsed.app}</strong> &nbsp;·&nbsp; `;
-    html+=`🏷 Category: <strong>${parsed.category}</strong></div>`;
-    el.innerHTML=html;
-    const match=categories.find(c=>c.name.toLowerCase().includes(parsed.category.toLowerCase().split(' ')[0]));
-    if(match) document.getElementById('exp-cat').value=match.id;
-  }catch(e){el.innerHTML='';}
-}
-
 function saveExpense(){
   const name=document.getElementById('exp-name').value.trim();
   const amount=parseFloat(document.getElementById('exp-amount').value);
@@ -1044,9 +988,7 @@ function saveExpense(){
 
   if(db){
     const expId = editingId || uid();
-    db.collection('expenses').doc(expId).set(
-      editingId ? expData : {...expData, appHint:''}
-    ).then(()=>{
+    db.collection('expenses').doc(expId).set(expData).then(()=>{
       clearAddForm();
       toast(editingId?'Expense updated ✓':'Expense added ✓');
       switchTab('expenses');
@@ -1056,8 +998,7 @@ function saveExpense(){
       const idx=expenses.findIndex(e=>e.id===editingId);
       if(idx>-1) expenses[idx]={...expenses[idx],...expData};
     } else {
-      const hint=document.getElementById('app-detect-result').textContent.trim();
-      expenses.push({id:uid(),...expData,appHint:hint});
+      expenses.push({id:uid(),...expData});
     }
     lsSave();
     clearAddForm();
@@ -1079,7 +1020,6 @@ function editExpense(id){
   document.getElementById('exp-user').value=e.addedBy;
   document.getElementById('exp-merchant').value=e.merchant||'';
   document.getElementById('exp-payment').value=e.payment||'';
-  document.getElementById('app-detect-result').innerHTML='';
   document.getElementById('add-form-title').textContent='Edit expense';
   document.getElementById('add-form-submit').textContent='Update expense →';
   document.getElementById('add-form-cancel').style.display='';
@@ -1097,7 +1037,6 @@ function clearAddForm(){
   document.getElementById('exp-date').value=today();
   document.getElementById('exp-merchant').value='';
   document.getElementById('exp-payment').value='';
-  document.getElementById('app-detect-result').innerHTML='';
   document.getElementById('add-form-title').textContent='Add new expense';
   document.getElementById('add-form-submit').textContent='Save expense →';
   document.getElementById('add-form-cancel').style.display='none';
@@ -1334,16 +1273,6 @@ function removePayment(name){
   renderCategories(); populateAllSelects();
 }
 
-// ── API KEY ──
-function getApiKey(){ return localStorage.getItem('kharcha-apikey')||''; }
-function saveApiKey(){
-  const key=document.getElementById('api-key-input').value.trim();
-  if(!key){toast('Paste your API key first');return;}
-  if(!key.startsWith('sk-ant-')){toast('Key should start with sk-ant-');return;}
-  localStorage.setItem('kharcha-apikey',key);
-  document.getElementById('api-key-status').innerHTML='<span style="color:var(--green);font-weight:500;">✓ Saved — AI features are now active</span>';
-  toast('API key saved ✓');
-}
 function saveNames(){
   const z=document.getElementById('name-zarin').value.trim()||'Zarin';
   const h=document.getElementById('name-husband').value.trim()||'Husband';
@@ -1371,17 +1300,11 @@ function clearAllData(){
       db.collection('config').doc('payments').delete(),
     ]).catch(e=>console.error('Firestore clear error',e));
   }
-  [SK_EXP,SK_CAT,SK_REC,SK_MER,SK_PAY,'kharcha-user','kharcha-apikey','kharcha-name-zarin','kharcha-name-husband'].forEach(k=>localStorage.removeItem(k));
+  [SK_EXP,SK_CAT,SK_REC,SK_MER,SK_PAY,'kharcha-user','kharcha-name-zarin','kharcha-name-husband'].forEach(k=>localStorage.removeItem(k));
   location.reload();
 }
 
 function renderSettings(){
-  const key=getApiKey();
-  document.getElementById('api-key-input').value=key;
-  const status=document.getElementById('api-key-status');
-  status.innerHTML=key
-    ?'<span style="color:var(--green);font-weight:500;">✓ API key is set — AI features active</span>'
-    :'<span style="color:var(--text3);">No key set — AI features disabled</span>';
   document.getElementById('name-zarin').value=getDisplayName('zarin');
   document.getElementById('name-husband').value=getDisplayName('husband');
 
