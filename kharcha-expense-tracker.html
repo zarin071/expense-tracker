@@ -135,6 +135,8 @@ nav{flex:1;padding:8px 0;overflow-y:auto;}
 .exp-by{font-size:11px;color:var(--text3);margin-top:2px;}
 .exp-del{background:none;border:none;color:var(--text3);cursor:pointer;font-size:18px;padding:4px;border-radius:4px;line-height:1;}
 .exp-del:hover{color:var(--red);background:var(--red-lt);}
+.exp-edit{background:none;border:none;color:var(--text3);cursor:pointer;font-size:15px;padding:4px;border-radius:4px;line-height:1;}
+.exp-edit:hover{color:var(--blue);background:var(--blue-lt);}
 
 /* ── BADGES ── */
 .badge{display:inline-flex;align-items:center;padding:2px 8px;border-radius:20px;font-size:11px;font-weight:500;white-space:nowrap;}
@@ -323,7 +325,7 @@ textarea{resize:vertical;min-height:72px;}
       <!-- ADD EXPENSE -->
       <div id="tab-add" class="section">
         <div class="form-section">
-          <div class="form-section-title">Add new expense</div>
+          <div class="form-section-title" id="add-form-title">Add new expense</div>
           <div class="form-grid" style="margin-bottom:14px;">
             <div class="form-group">
               <label>Description *</label>
@@ -369,8 +371,9 @@ textarea{resize:vertical;min-height:72px;}
           </div>
           <div id="app-detect-result"></div>
           <div class="form-actions">
-            <button class="btn btn-outline" onclick="clearAddForm()">Clear</button>
-            <button class="btn btn-green" onclick="addExpense()">Save expense →</button>
+            <button class="btn btn-outline" id="add-form-cancel" onclick="cancelEdit()" style="display:none;">Cancel</button>
+            <button class="btn btn-outline" id="add-form-clear" onclick="clearAddForm()">Clear</button>
+            <button class="btn btn-green" id="add-form-submit" onclick="saveExpense()">Save expense →</button>
           </div>
         </div>
       </div>
@@ -537,6 +540,7 @@ textarea{resize:vertical;min-height:72px;}
 let currentUser = null, selectedUser = null;
 let categories = [], expenses = [], recurring = [];
 let donutChart = null, barChart = null, detectDebounce = null;
+let editingId = null;
 
 const SK_EXP = 'kharcha-exp', SK_CAT = 'kharcha-cat', SK_REC = 'kharcha-rec', SK_MER = 'kharcha-merchants', SK_PAY = 'kharcha-payments';
 
@@ -782,6 +786,7 @@ function expItemHTML(e){
     <div class="exp-right">
       <div class="exp-amount">${fmt(e.amount)}</div>
     </div>
+    <button class="exp-edit" onclick="editExpense('${e.id}')" title="Edit">✏</button>
     <button class="exp-del" onclick="deleteExpense('${e.id}')" title="Delete">×</button>
   </div>`;
 }
@@ -816,7 +821,7 @@ async function detectApp(desc){
   }catch(e){el.innerHTML='';}
 }
 
-function addExpense(){
+function saveExpense(){
   const name=document.getElementById('exp-name').value.trim();
   const amount=parseFloat(document.getElementById('exp-amount').value);
   const catId=document.getElementById('exp-cat').value;
@@ -826,17 +831,53 @@ function addExpense(){
   const merchant=document.getElementById('exp-merchant').value;
   const payment=document.getElementById('exp-payment').value;
   if(!name||!amount||!date){toast('Fill in description, amount and date');return;}
-  const hint=document.getElementById('app-detect-result').textContent.trim();
-  expenses.push({id:uid(),name,amount,catId,date,note,addedBy,merchant,payment,appHint:hint});
-  save(); clearAddForm(); toast('Expense added ✓'); switchTab('expenses');
+  if(editingId){
+    const idx=expenses.findIndex(e=>e.id===editingId);
+    if(idx>-1) expenses[idx]={...expenses[idx],name,amount,catId,date,note,addedBy,merchant,payment};
+    save(); clearAddForm(); toast('Expense updated ✓'); switchTab('expenses');
+  } else {
+    const hint=document.getElementById('app-detect-result').textContent.trim();
+    expenses.push({id:uid(),name,amount,catId,date,note,addedBy,merchant,payment,appHint:hint});
+    save(); clearAddForm(); toast('Expense added ✓'); switchTab('expenses');
+  }
+}
+
+function editExpense(id){
+  const e=expenses.find(x=>x.id===id);
+  if(!e) return;
+  editingId=id;
+  switchTab('add');
+  document.getElementById('exp-name').value=e.name;
+  document.getElementById('exp-amount').value=e.amount;
+  document.getElementById('exp-cat').value=e.catId;
+  document.getElementById('exp-date').value=e.date;
+  document.getElementById('exp-note').value=e.note||'';
+  document.getElementById('exp-user').value=e.addedBy;
+  document.getElementById('exp-merchant').value=e.merchant||'';
+  document.getElementById('exp-payment').value=e.payment||'';
+  document.getElementById('app-detect-result').innerHTML='';
+  document.getElementById('add-form-title').textContent='Edit expense';
+  document.getElementById('add-form-submit').textContent='Update expense →';
+  document.getElementById('add-form-cancel').style.display='';
+  document.getElementById('add-form-clear').style.display='none';
+}
+
+function cancelEdit(){
+  clearAddForm();
+  switchTab('expenses');
 }
 
 function clearAddForm(){
+  editingId=null;
   ['exp-name','exp-amount','exp-note'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('exp-date').value=today();
   document.getElementById('exp-merchant').value='';
   document.getElementById('exp-payment').value='';
   document.getElementById('app-detect-result').innerHTML='';
+  document.getElementById('add-form-title').textContent='Add new expense';
+  document.getElementById('add-form-submit').textContent='Save expense →';
+  document.getElementById('add-form-cancel').style.display='none';
+  document.getElementById('add-form-clear').style.display='';
 }
 
 // ── ALL EXPENSES ──
