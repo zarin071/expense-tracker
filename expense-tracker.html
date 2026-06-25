@@ -5,6 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
 <title>Kharcha — Shared Expense Tracker</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/9.22.0/firebase-firestore-compat.js"></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 :root{
@@ -78,6 +80,8 @@ nav{flex:1;padding:8px 0;overflow-y:auto;}
 .sb-footer{padding:12px 16px;border-top:1px solid rgba(255,255,255,.06);}
 .sb-export{display:flex;align-items:center;gap:8px;color:rgba(255,255,255,.5);font-size:12px;cursor:pointer;padding:8px 0;}
 .sb-export:hover{color:rgba(255,255,255,.8);}
+.sb-sync{font-size:11px;padding:4px 0;display:flex;align-items:center;gap:6px;}
+.sb-sync-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0;}
 
 /* ── MAIN CONTENT ── */
 .main{margin-left:220px;flex:1;min-height:100vh;display:flex;flex-direction:column;}
@@ -250,7 +254,7 @@ textarea{resize:vertical;min-height:72px;}
       </div>
     </div>
     <button class="btn btn-green" style="width:100%;justify-content:center;" onclick="startApp()">Continue →</button>
-    <div style="font-size:11px;color:var(--text3);margin-top:12px;text-align:center;line-height:1.5;">Data is stored on this device. Share the HTML file with your husband to use on another device — expenses can be synced via CSV export/import.</div>
+    <div id="onboard-sync-note" style="font-size:11px;color:var(--text3);margin-top:12px;text-align:center;line-height:1.5;">Data is stored on this device. Connect Firebase in Settings for real-time sync across devices.</div>
   </div>
 </div>
 
@@ -285,6 +289,7 @@ textarea{resize:vertical;min-height:72px;}
     </nav>
     <div class="sb-footer">
       <div class="sb-export" onclick="exportCSV()">⬇ Export CSV</div>
+      <div class="sb-sync" id="sb-sync-status"></div>
     </div>
   </aside>
 
@@ -427,7 +432,6 @@ textarea{resize:vertical;min-height:72px;}
 
       <!-- CATEGORIES -->
       <div id="tab-categories" class="section">
-        <!-- Spending categories -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">Spending categories</div>
           <div class="cat-grid" id="cat-chips"></div>
@@ -441,7 +445,6 @@ textarea{resize:vertical;min-height:72px;}
             <button class="btn btn-green btn-sm" onclick="addCategory()">+ Add category</button>
           </div>
         </div>
-        <!-- Ordered from -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">🏪 Ordered from <span style="font-size:12px;font-weight:400;color:var(--text3);">— platforms &amp; merchants</span></div>
           <div class="cat-grid" id="merchant-chips"></div>
@@ -457,7 +460,6 @@ textarea{resize:vertical;min-height:72px;}
             <button class="btn btn-green btn-sm" onclick="addMerchant()">+ Add merchant</button>
           </div>
         </div>
-        <!-- Paid using -->
         <div class="form-section">
           <div class="form-section-title">💳 Paid using <span style="font-size:12px;font-weight:400;color:var(--text3);">— payment methods</span></div>
           <div class="cat-grid" id="payment-chips"></div>
@@ -477,6 +479,40 @@ textarea{resize:vertical;min-height:72px;}
 
       <!-- SETTINGS -->
       <div id="tab-settings" class="section">
+
+        <!-- FIREBASE -->
+        <div class="form-section" style="margin-bottom:16px;">
+          <div class="form-section-title">🔥 Firebase — Cloud sync</div>
+          <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">
+            Connect Firebase Firestore to sync expenses across devices in real time — both you and your husband will always see the same data.
+          </p>
+          <div id="fb-status" style="margin-bottom:12px;font-size:13px;"></div>
+          <div class="form-group" style="margin-bottom:12px;">
+            <label>Firebase config (JSON)</label>
+            <textarea id="fb-config-input" style="min-height:110px;font-family:monospace;font-size:12px;" placeholder='{
+  "apiKey": "AIza...",
+  "authDomain": "your-app.firebaseapp.com",
+  "projectId": "your-app",
+  "storageBucket": "your-app.appspot.com",
+  "messagingSenderId": "123456",
+  "appId": "1:123456:web:abc123"
+}'></textarea>
+          </div>
+          <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;">
+            <button class="btn btn-green" onclick="connectFirebase()">Connect →</button>
+            <button class="btn btn-outline" id="fb-disconnect-btn" onclick="disconnectFirebase()" style="display:none;">Disconnect</button>
+            <button class="btn btn-outline btn-sm" id="fb-migrate-btn" onclick="migrateToFirebase()" style="display:none;" title="Upload current localStorage data to Firestore">⬆ Migrate local data</button>
+          </div>
+          <div style="margin-top:14px;padding:12px 14px;background:var(--surface2);border-radius:var(--radius);font-size:12px;color:var(--text2);line-height:1.6;">
+            <strong>How to set up Firebase (free):</strong><br/>
+            1. Go to <a href="https://console.firebase.google.com" target="_blank" style="color:var(--green);">console.firebase.google.com</a> → Create project<br/>
+            2. Add a Web app → copy the firebaseConfig object<br/>
+            3. Go to Firestore Database → Create database (start in test mode)<br/>
+            4. Paste the config above and click Connect
+          </div>
+        </div>
+
+        <!-- CLAUDE AI -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">🤖 Claude AI — API key</div>
           <p style="font-size:13px;color:var(--text2);margin-bottom:14px;line-height:1.6;">The AI features (app detection, SMS parsing) need your Anthropic API key. It's saved only on <em>this device</em> in your browser — never sent anywhere except directly to Anthropic's API.</p>
@@ -497,6 +533,8 @@ textarea{resize:vertical;min-height:72px;}
             <strong>Cost:</strong> Each AI suggestion uses ~200 tokens ≈ $0.0003. Very cheap for occasional use.
           </div>
         </div>
+
+        <!-- USER NAMES -->
         <div class="form-section" style="margin-bottom:16px;">
           <div class="form-section-title">👥 User names</div>
           <div class="form-grid" style="max-width:380px;margin-bottom:12px;">
@@ -505,6 +543,8 @@ textarea{resize:vertical;min-height:72px;}
           </div>
           <button class="btn btn-green btn-sm" onclick="saveNames()">Save names</button>
         </div>
+
+        <!-- DATA -->
         <div class="form-section">
           <div class="form-section-title">🗑 Data</div>
           <p style="font-size:13px;color:var(--text2);margin-bottom:14px;">Export your data before clearing. This cannot be undone.</p>
@@ -541,6 +581,7 @@ let currentUser = null, selectedUser = null;
 let categories = [], expenses = [], recurring = [];
 let donutChart = null, barChart = null, detectDebounce = null;
 let editingId = null;
+let db = null, fbListeners = [];
 
 const SK_EXP = 'kharcha-exp', SK_CAT = 'kharcha-cat', SK_REC = 'kharcha-rec', SK_MER = 'kharcha-merchants', SK_PAY = 'kharcha-payments';
 
@@ -566,23 +607,182 @@ const DEFAULT_PAYMENTS = [
 ];
 let merchants = [], paymentMethods = [];
 
-// ── STORAGE ──
-function save(){
+// ── LOCALSTORAGE (fallback when no Firebase) ──
+function lsSave(){
   localStorage.setItem(SK_EXP,JSON.stringify(expenses));
   localStorage.setItem(SK_CAT,JSON.stringify(categories));
   localStorage.setItem(SK_REC,JSON.stringify(recurring));
   localStorage.setItem(SK_MER,JSON.stringify(merchants));
   localStorage.setItem(SK_PAY,JSON.stringify(paymentMethods));
 }
-function load(){
+function lsLoad(){
   expenses = JSON.parse(localStorage.getItem(SK_EXP)||'[]');
   const sc = localStorage.getItem(SK_CAT);
-  categories = sc ? JSON.parse(sc) : DEFAULT_CATS;
+  categories = sc ? JSON.parse(sc) : [...DEFAULT_CATS];
   recurring = JSON.parse(localStorage.getItem(SK_REC)||'[]');
   const sm = localStorage.getItem(SK_MER);
   merchants = sm ? JSON.parse(sm) : [...DEFAULT_MERCHANTS];
   const sp = localStorage.getItem(SK_PAY);
   paymentMethods = sp ? JSON.parse(sp) : [...DEFAULT_PAYMENTS];
+}
+
+// ── FIREBASE ──
+function getFbConfig(){
+  try{ return JSON.parse(localStorage.getItem('kharcha-fbconfig')||'null'); }catch(e){ return null; }
+}
+
+function initFirebase(config){
+  try{
+    // Delete existing apps to allow re-init
+    if(firebase.apps.length){
+      firebase.apps.forEach(a=>{ try{ a.delete(); }catch(e){} });
+    }
+    firebase.initializeApp(config);
+    db = firebase.firestore();
+    setupFbListeners();
+    updateSyncStatus(true);
+    return true;
+  }catch(e){
+    console.error('Firebase init error:',e);
+    db = null;
+    updateSyncStatus(false, e.message);
+    return false;
+  }
+}
+
+function setupFbListeners(){
+  fbListeners.forEach(u=>{ try{ u(); }catch(e){} });
+  fbListeners = [];
+
+  fbListeners.push(
+    db.collection('expenses').onSnapshot(snap=>{
+      expenses = snap.docs.map(d=>({id:d.id,...d.data()}));
+      renderCurrentTab();
+    }, e=>console.error('expenses snapshot error',e))
+  );
+
+  fbListeners.push(
+    db.collection('recurring').onSnapshot(snap=>{
+      recurring = snap.docs.map(d=>({id:d.id,...d.data()}));
+      const active = document.querySelector('.section.active');
+      if(active && active.id==='tab-recurring') renderRecurring();
+    }, e=>console.error('recurring snapshot error',e))
+  );
+
+  fbListeners.push(
+    db.collection('config').doc('categories').onSnapshot(doc=>{
+      if(doc.exists){
+        categories = doc.data().data || DEFAULT_CATS;
+      } else {
+        db.collection('config').doc('categories').set({data: categories});
+      }
+      populateAllSelects();
+      const active = document.querySelector('.section.active');
+      if(active && active.id==='tab-categories') renderCategories();
+    })
+  );
+
+  fbListeners.push(
+    db.collection('config').doc('merchants').onSnapshot(doc=>{
+      if(doc.exists){
+        merchants = doc.data().data || DEFAULT_MERCHANTS;
+      } else {
+        db.collection('config').doc('merchants').set({data: merchants});
+      }
+      populateAllSelects();
+    })
+  );
+
+  fbListeners.push(
+    db.collection('config').doc('payments').onSnapshot(doc=>{
+      if(doc.exists){
+        paymentMethods = doc.data().data || DEFAULT_PAYMENTS;
+      } else {
+        db.collection('config').doc('payments').set({data: paymentMethods});
+      }
+      populateAllSelects();
+    })
+  );
+}
+
+function renderCurrentTab(){
+  const active = document.querySelector('.section.active');
+  if(!active) return;
+  const tab = active.id.replace('tab-','');
+  if(tab==='overview') renderOverview();
+  else if(tab==='expenses'){ populateFilterCat(); populateFilterMonth(); renderExpenses(); }
+  else if(tab==='recurring') renderRecurring();
+}
+
+function connectFirebase(){
+  const raw = document.getElementById('fb-config-input').value.trim();
+  if(!raw){ toast('Paste your Firebase config first'); return; }
+  let config;
+  try{ config = JSON.parse(raw); }
+  catch(e){ toast('Invalid JSON — check the format'); return; }
+  if(!config.projectId || !config.apiKey){ toast('Config missing apiKey or projectId'); return; }
+  const ok = initFirebase(config);
+  if(ok){
+    localStorage.setItem('kharcha-fbconfig', JSON.stringify(config));
+    toast('Firebase connected ✓');
+    renderSettings();
+  } else {
+    document.getElementById('fb-status').innerHTML='<span style="color:var(--red);">✗ Connection failed — check your config and Firestore rules</span>';
+    toast('Firebase connection failed');
+  }
+}
+
+function disconnectFirebase(){
+  fbListeners.forEach(u=>{ try{ u(); }catch(e){} });
+  fbListeners = [];
+  db = null;
+  localStorage.removeItem('kharcha-fbconfig');
+  lsLoad();
+  updateSyncStatus(false);
+  toast('Disconnected — using local storage');
+  renderSettings();
+  renderOverview();
+}
+
+function fbSaveConfig(key, arr){
+  if(!db) return;
+  db.collection('config').doc(key).set({data: arr}).catch(e=>console.error(e));
+}
+
+function migrateToFirebase(){
+  if(!db){ toast('Connect Firebase first'); return; }
+  if(!confirm('Upload all local data to Firebase? Existing Firebase data will be overwritten.')) return;
+  const local_expenses = JSON.parse(localStorage.getItem(SK_EXP)||'[]');
+  const local_cat = JSON.parse(localStorage.getItem(SK_CAT)||'null') || DEFAULT_CATS;
+  const local_rec = JSON.parse(localStorage.getItem(SK_REC)||'[]');
+  const local_mer = JSON.parse(localStorage.getItem(SK_MER)||'null') || DEFAULT_MERCHANTS;
+  const local_pay = JSON.parse(localStorage.getItem(SK_PAY)||'null') || DEFAULT_PAYMENTS;
+
+  const batch = db.batch();
+  local_expenses.forEach(e=>{
+    const {id,...data}=e;
+    batch.set(db.collection('expenses').doc(id), data);
+  });
+  local_rec.forEach(r=>{
+    const {id,...data}=r;
+    batch.set(db.collection('recurring').doc(id), data);
+  });
+  batch.set(db.collection('config').doc('categories'), {data: local_cat});
+  batch.set(db.collection('config').doc('merchants'),  {data: local_mer});
+  batch.set(db.collection('config').doc('payments'),   {data: local_pay});
+  batch.commit()
+    .then(()=>toast('Local data migrated to Firebase ✓'))
+    .catch(e=>toast('Migration error: '+e.message));
+}
+
+function updateSyncStatus(connected, errMsg){
+  const el = document.getElementById('sb-sync-status');
+  if(!el) return;
+  if(connected){
+    el.innerHTML=`<div class="sb-sync-dot" style="background:#1aad5e;"></div><span style="color:rgba(255,255,255,.5);">Syncing to Firebase</span>`;
+  } else {
+    el.innerHTML=`<div class="sb-sync-dot" style="background:#9ca3af;"></div><span style="color:rgba(255,255,255,.35);">Local only</span>`;
+  }
 }
 
 // ── HELPERS ──
@@ -608,15 +808,20 @@ function selectUser(u){
   document.getElementById('opt-'+u).classList.add('selected');
 }
 function startApp(){
-  if(!selectedUser){toast('Please select who you are');return;}
+  if(!selectedUser){ toast('Please select who you are'); return; }
   currentUser=selectedUser;
   localStorage.setItem('kharcha-user',currentUser);
   document.getElementById('onboarding').style.display='none';
   initUser();
-  load();
+  // Load from localStorage first so the UI isn't empty while Firebase connects
+  lsLoad();
   checkDue();
   renderOverview();
   populateAllSelects();
+  // Then connect Firebase if configured (onSnapshot will update UI once live)
+  const fbConfig = getFbConfig();
+  if(fbConfig) initFirebase(fbConfig);
+  else updateSyncStatus(false);
 }
 function initUser(){
   const isZ = currentUser==='zarin';
@@ -638,7 +843,14 @@ window.addEventListener('DOMContentLoaded',()=>{
   if(saved){
     selectedUser=saved; currentUser=saved; selectUser(saved);
     document.getElementById('onboarding').style.display='none';
-    initUser(); load(); checkDue(); renderOverview(); populateAllSelects();
+    initUser();
+    lsLoad();
+    checkDue();
+    renderOverview();
+    populateAllSelects();
+    const fbConfig = getFbConfig();
+    if(fbConfig) initFirebase(fbConfig);
+    else updateSyncStatus(false);
   }
 });
 
@@ -663,11 +875,10 @@ function switchTab(tab){
   document.getElementById('tab-'+tab).classList.add('active');
   document.getElementById('topbar-title').textContent=TAB_TITLES[tab]||tab;
   if(tab==='overview') renderOverview();
-  if(tab==='expenses'){populateFilterCat();populateFilterMonth();renderExpenses();}
+  if(tab==='expenses'){ populateFilterCat(); populateFilterMonth(); renderExpenses(); }
   if(tab==='recurring') renderRecurring();
   if(tab==='categories') renderCategories();
   if(tab==='settings') renderSettings();
-  // hide fab on add page
   document.querySelector('.fab').style.display = tab==='add'?'none':'flex';
 }
 function populateAllSelects(){
@@ -733,7 +944,6 @@ function renderOverview(){
     <div class="metric-card"><div class="metric-label">Husband's total</div><div class="metric-val" style="color:var(--blue)">${fmt(hTotal)}</div></div>
   `;
 
-  // donut
   const catMap={};
   expenses.forEach(e=>{catMap[e.catId]=(catMap[e.catId]||0)+e.amount;});
   const catData=Object.entries(catMap).map(([id,amt])=>({cat:getCat(id),amt})).sort((a,b)=>b.amt-a.amt);
@@ -747,7 +957,6 @@ function renderOverview(){
     document.getElementById('cat-legend').innerHTML=catData.slice(0,5).map(d=>`<div class="legend-item"><div class="legend-dot" style="background:${d.cat.color}"></div>${d.cat.name}</div>`).join('');
   }
 
-  // bar
   const monthMap={};
   expenses.forEach(e=>{const m=e.date.slice(0,7);monthMap[m]=(monthMap[m]||0)+e.amount;});
   const months=Object.keys(monthMap).sort().slice(-6);
@@ -760,7 +969,6 @@ function renderOverview(){
     });
   }
 
-  // recent
   const recent=[...expenses].sort((a,b)=>b.date.localeCompare(a.date)).slice(0,5);
   const rl=document.getElementById('recent-list');
   if(!recent.length){rl.innerHTML='<div class="empty"><div class="empty-emoji">🧾</div><div class="empty-text">No expenses yet</div><div class="empty-sub">Tap + Add expense to get started</div></div>';return;}
@@ -791,7 +999,7 @@ function expItemHTML(e){
   </div>`;
 }
 
-// ── ADD EXPENSE ──
+// ── ADD / EDIT EXPENSE ──
 function handleDescChange(){
   clearTimeout(detectDebounce);
   const name=document.getElementById('exp-name').value.trim();
@@ -831,14 +1039,30 @@ function saveExpense(){
   const merchant=document.getElementById('exp-merchant').value;
   const payment=document.getElementById('exp-payment').value;
   if(!name||!amount||!date){toast('Fill in description, amount and date');return;}
-  if(editingId){
-    const idx=expenses.findIndex(e=>e.id===editingId);
-    if(idx>-1) expenses[idx]={...expenses[idx],name,amount,catId,date,note,addedBy,merchant,payment};
-    save(); clearAddForm(); toast('Expense updated ✓'); switchTab('expenses');
+
+  const expData={name,amount,catId,date,note,addedBy,merchant,payment};
+
+  if(db){
+    const expId = editingId || uid();
+    db.collection('expenses').doc(expId).set(
+      editingId ? expData : {...expData, appHint:''}
+    ).then(()=>{
+      clearAddForm();
+      toast(editingId?'Expense updated ✓':'Expense added ✓');
+      switchTab('expenses');
+    }).catch(e=>toast('Error: '+e.message));
   } else {
-    const hint=document.getElementById('app-detect-result').textContent.trim();
-    expenses.push({id:uid(),name,amount,catId,date,note,addedBy,merchant,payment,appHint:hint});
-    save(); clearAddForm(); toast('Expense added ✓'); switchTab('expenses');
+    if(editingId){
+      const idx=expenses.findIndex(e=>e.id===editingId);
+      if(idx>-1) expenses[idx]={...expenses[idx],...expData};
+    } else {
+      const hint=document.getElementById('app-detect-result').textContent.trim();
+      expenses.push({id:uid(),...expData,appHint:hint});
+    }
+    lsSave();
+    clearAddForm();
+    toast(editingId?'Expense updated ✓':'Expense added ✓');
+    switchTab('expenses');
   }
 }
 
@@ -904,8 +1128,14 @@ function renderExpenses(){
 }
 function deleteExpense(id){
   if(!confirm('Delete this expense?')) return;
-  expenses=expenses.filter(e=>e.id!==id);
-  save(); renderExpenses(); toast('Deleted');
+  if(db){
+    db.collection('expenses').doc(id).delete()
+      .then(()=>toast('Deleted'))
+      .catch(e=>toast('Error: '+e.message));
+  } else {
+    expenses=expenses.filter(e=>e.id!==id);
+    lsSave(); renderExpenses(); toast('Deleted');
+  }
 }
 
 // ── EXPORT CSV ──
@@ -941,13 +1171,21 @@ function addRecurring(){
   const date=document.getElementById('rec-date').value;
   const addedBy=document.getElementById('rec-user').value;
   if(!name||!amount||!date){toast('Fill in all required fields');return;}
-  recurring.push({id:uid(),name,amount,catId,freq,nextDue:date,addedBy});
-  save();
+  const recData={name,amount,catId,freq,nextDue:date,addedBy};
+  if(db){
+    db.collection('recurring').doc(uid()).set(recData)
+      .then(()=>{ clearRecForm(); toast('Recurring expense added ✓'); })
+      .catch(e=>toast('Error: '+e.message));
+  } else {
+    recurring.push({id:uid(),...recData});
+    lsSave(); clearRecForm(); renderRecurring(); toast('Recurring expense added ✓');
+  }
+}
+function clearRecForm(){
   ['rec-name','rec-amount'].forEach(id=>document.getElementById(id).value='');
   document.getElementById('rec-date').value=today();
-  renderRecurring(); toast('Recurring expense added ✓');
 }
-function nextDue(date,freq){
+function calcNextDue(date,freq){
   const d=new Date(date);
   if(freq==='monthly') d.setMonth(d.getMonth()+1);
   else if(freq==='weekly') d.setDate(d.getDate()+7);
@@ -958,14 +1196,31 @@ function checkDue(){}
 function logNow(id){
   const r=recurring.find(x=>x.id===id);
   if(!r) return;
-  expenses.push({id:uid(),name:r.name,amount:r.amount,catId:r.catId,date:today(),note:'Recurring',addedBy:r.addedBy,appHint:''});
-  r.nextDue=nextDue(today(),r.freq);
-  save(); renderRecurring(); toast(`"${r.name}" logged ✓`);
+  const expData={name:r.name,amount:r.amount,catId:r.catId,date:today(),note:'Recurring',addedBy:r.addedBy,merchant:'',payment:'',appHint:''};
+  const newDue=calcNextDue(today(),r.freq);
+  if(db){
+    const batch=db.batch();
+    batch.set(db.collection('expenses').doc(uid()), expData);
+    batch.update(db.collection('recurring').doc(id), {nextDue:newDue});
+    batch.commit()
+      .then(()=>toast(`"${r.name}" logged ✓`))
+      .catch(e=>toast('Error: '+e.message));
+  } else {
+    expenses.push({id:uid(),...expData});
+    r.nextDue=newDue;
+    lsSave(); renderRecurring(); toast(`"${r.name}" logged ✓`);
+  }
 }
 function deleteRec(id){
   if(!confirm('Remove this recurring expense?')) return;
-  recurring=recurring.filter(r=>r.id!==id);
-  save(); renderRecurring(); toast('Removed');
+  if(db){
+    db.collection('recurring').doc(id).delete()
+      .then(()=>toast('Removed'))
+      .catch(e=>toast('Error: '+e.message));
+  } else {
+    recurring=recurring.filter(r=>r.id!==id);
+    lsSave(); renderRecurring(); toast('Removed');
+  }
 }
 function renderRecurring(){
   populateAllSelects();
@@ -1010,12 +1265,16 @@ function addCategory(){
   if(categories.find(c=>c.name.toLowerCase()===name.toLowerCase())){toast('Category already exists');return;}
   categories.push({id:uid(),name,color,icon:'📌'});
   document.getElementById('cat-name').value='';
-  save(); renderCategories(); populateAllSelects(); toast('Category added ✓');
+  if(db) fbSaveConfig('categories',categories);
+  else lsSave();
+  renderCategories(); populateAllSelects(); toast('Category added ✓');
 }
 function removeCat(id){
   if(expenses.some(e=>e.catId===id)&&!confirm('This category has expenses. Remove anyway?')) return;
   categories=categories.filter(c=>c.id!==id);
-  save(); renderCategories(); populateAllSelects();
+  if(db) fbSaveConfig('categories',categories);
+  else lsSave();
+  renderCategories(); populateAllSelects();
 }
 function renderCategories(){
   document.getElementById('cat-chips').innerHTML=categories.map(c=>`
@@ -1029,13 +1288,13 @@ function renderCategories(){
   if(merEl) merEl.innerHTML=merchants.map(m=>`
     <div class="cat-chip" style="background:#f0fdf4;border-color:#bbf7d0;">
       🏪 ${m}
-      <button class="cat-chip-del" onclick="removeMerchant('${m.replace(/'/g,"\'")}')">×</button>
+      <button class="cat-chip-del" onclick="removeMerchant('${m.replace(/'/g,"\\'")}')">×</button>
     </div>`).join('');
   const payEl=document.getElementById('payment-chips');
   if(payEl) payEl.innerHTML=paymentMethods.map(p=>`
     <div class="cat-chip" style="background:#eff6ff;border-color:#bfdbfe;">
       💳 ${p}
-      <button class="cat-chip-del" onclick="removePayment('${p.replace(/'/g,"\'")}')">×</button>
+      <button class="cat-chip-del" onclick="removePayment('${p.replace(/'/g,"\\'")}')">×</button>
     </div>`).join('');
 }
 
@@ -1046,11 +1305,15 @@ function addMerchant(){
   if(merchants.includes(name)){toast('Already exists');return;}
   merchants.push(name);
   document.getElementById('merchant-name').value='';
-  save(); renderCategories(); populateAllSelects(); toast('Merchant added ✓');
+  if(db) fbSaveConfig('merchants',merchants);
+  else lsSave();
+  renderCategories(); populateAllSelects(); toast('Merchant added ✓');
 }
 function removeMerchant(name){
   merchants=merchants.filter(m=>m!==name);
-  save(); renderCategories(); populateAllSelects();
+  if(db) fbSaveConfig('merchants',merchants);
+  else lsSave();
+  renderCategories(); populateAllSelects();
 }
 
 // ── PAYMENTS ──
@@ -1060,11 +1323,15 @@ function addPayment(){
   if(paymentMethods.includes(name)){toast('Already exists');return;}
   paymentMethods.push(name);
   document.getElementById('payment-name').value='';
-  save(); renderCategories(); populateAllSelects(); toast('Payment method added ✓');
+  if(db) fbSaveConfig('payments',paymentMethods);
+  else lsSave();
+  renderCategories(); populateAllSelects(); toast('Payment method added ✓');
 }
 function removePayment(name){
   paymentMethods=paymentMethods.filter(p=>p!==name);
-  save(); renderCategories(); populateAllSelects();
+  if(db) fbSaveConfig('payments',paymentMethods);
+  else lsSave();
+  renderCategories(); populateAllSelects();
 }
 
 // ── API KEY ──
@@ -1085,11 +1352,29 @@ function saveNames(){
   toast('Names saved ✓');
 }
 function getDisplayName(user){ return localStorage.getItem('kharcha-name-'+user)||(user==='zarin'?'Zarin':'Husband'); }
+
 function clearAllData(){
   if(!confirm('Delete ALL expenses, categories and settings? This cannot be undone.')) return;
+  // Clear Firestore if connected
+  if(db){
+    const deleteCollection = (colName) =>
+      db.collection(colName).get().then(snap=>{
+        const batch=db.batch();
+        snap.docs.forEach(d=>batch.delete(d.ref));
+        return batch.commit();
+      });
+    Promise.all([
+      deleteCollection('expenses'),
+      deleteCollection('recurring'),
+      db.collection('config').doc('categories').delete(),
+      db.collection('config').doc('merchants').delete(),
+      db.collection('config').doc('payments').delete(),
+    ]).catch(e=>console.error('Firestore clear error',e));
+  }
   [SK_EXP,SK_CAT,SK_REC,SK_MER,SK_PAY,'kharcha-user','kharcha-apikey','kharcha-name-zarin','kharcha-name-husband'].forEach(k=>localStorage.removeItem(k));
   location.reload();
 }
+
 function renderSettings(){
   const key=getApiKey();
   document.getElementById('api-key-input').value=key;
@@ -1099,6 +1384,26 @@ function renderSettings(){
     :'<span style="color:var(--text3);">No key set — AI features disabled</span>';
   document.getElementById('name-zarin').value=getDisplayName('zarin');
   document.getElementById('name-husband').value=getDisplayName('husband');
+
+  const fbConfig=getFbConfig();
+  const fbStatusEl=document.getElementById('fb-status');
+  const disconnectBtn=document.getElementById('fb-disconnect-btn');
+  const migrateBtn=document.getElementById('fb-migrate-btn');
+  if(db && fbConfig){
+    fbStatusEl.innerHTML=`<span style="color:var(--green);font-weight:500;">✓ Connected — project: <code style="background:var(--green-lt);padding:1px 6px;border-radius:4px;">${fbConfig.projectId}</code></span>`;
+    document.getElementById('fb-config-input').value=JSON.stringify(fbConfig,null,2);
+    disconnectBtn.style.display='';
+    migrateBtn.style.display='';
+  } else if(fbConfig){
+    fbStatusEl.innerHTML='<span style="color:var(--orange);">Config saved but not connected — reload the page</span>';
+    document.getElementById('fb-config-input').value=JSON.stringify(fbConfig,null,2);
+    disconnectBtn.style.display='';
+    migrateBtn.style.display='none';
+  } else {
+    fbStatusEl.innerHTML='<span style="color:var(--text3);">Not connected — using local storage</span>';
+    disconnectBtn.style.display='none';
+    migrateBtn.style.display='none';
+  }
 }
 
 // ── PARSE SMS ──
@@ -1127,7 +1432,6 @@ function addFromParse(amount,merchant,date){
   document.getElementById('exp-amount').value=amount;
   document.getElementById('exp-name').value=merchant||'Transaction';
   document.getElementById('exp-date').value=date;
-  // Try to pre-select matching merchant in dropdown
   const merSel=document.getElementById('exp-merchant');
   if(merSel&&merchant){
     const match=[...merSel.options].find(o=>o.value.toLowerCase().includes(merchant.toLowerCase()));
